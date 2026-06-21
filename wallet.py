@@ -109,6 +109,9 @@ class DuinoWallet:
         self.password = None
         self.session = None
         self.master_password = None
+        # Cached balance and last check time
+        self.cached_balance = None
+        self.last_check_time = None
 
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -185,7 +188,6 @@ class DuinoWallet:
         elif isinstance(result, (int, float)):
             return float(result)
         elif isinstance(result, str):
-            # Try to parse as float, handle empty string
             if result.strip() == "":
                 return 0.0
             try:
@@ -269,17 +271,18 @@ class DuinoWallet:
         # Main loop
         while True:
             clear_screen()
-            # Fetch balance for header
-            try:
-                bal = await self.get_balance()
-                balance_str = f"{format_number(bal)} DUCO"
-                if balance_str.strip() == "DUCO":  # happens if format_number returns empty string
-                    balance_str = "0 DUCO"
-            except Exception as e:
-                # Show a clear error instead of "?"
-                balance_str = f"Error: {str(e)[:30]}"
+            # Build header – use cached balance if available, else placeholder
+            if self.cached_balance is not None:
+                bal_str = f"{format_number(self.cached_balance)} DUCO"
+                if self.last_check_time:
+                    time_str = self.last_check_time.strftime("%d-%m-%Y %H:%M:%S")
+                    balance_display = f"{bal_str} (last check: {time_str})"
+                else:
+                    balance_display = bal_str
+            else:
+                balance_display = "-- (check with option 1)"
 
-            header_line = f"{Fore.CYAN}◆ Duino-Coin Wallet {Style.RESET_ALL}│ {Fore.GREEN}{self.username}{Style.RESET_ALL} │ Balance: {Fore.YELLOW}{balance_str}{Style.RESET_ALL}"
+            header_line = f"{Fore.CYAN}◆ Duino-Coin Wallet {Style.RESET_ALL}│ {Fore.GREEN}{self.username}{Style.RESET_ALL} │ Balance: {Fore.YELLOW}{balance_display}{Style.RESET_ALL}"
             menu_lines = [
                 " 1. View balance",
                 " 2. View recent transactions",
@@ -300,6 +303,9 @@ class DuinoWallet:
             try:
                 if choice == "1":
                     bal = await self.get_balance()
+                    # Cache the balance and timestamp
+                    self.cached_balance = bal
+                    self.last_check_time = datetime.now()
                     clear_screen()
                     print_frame("Balance", [f"{format_number(bal)} DUCO"], width=50)
                     input("Press Enter to continue...")
