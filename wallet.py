@@ -42,43 +42,30 @@ def encrypt_data(data: str, master_password: str) -> str:
     iv = os.urandom(IV_LEN)
     key = derive_key(master_password, salt)
 
-    # Create the CBC mode and the encrypter
     mode = pyaes.AESModeOfOperationCBC(key, iv)
     encrypter = pyaes.Encrypter(mode)
 
-    # Feed the plaintext bytes (Encrypter buffers internally)
     plaintext = data.encode('utf-8')
     ciphertext = encrypter.feed(plaintext)
+    ciphertext += encrypter.feed()  # finalise with padding
 
-    # Finalise with padding (automatically adds PKCS#7 padding)
-    ciphertext += encrypter.feed()
-
-    # Combine salt + iv + ciphertext and base64 encode
     combined = salt + iv + ciphertext
     return base64.b64encode(combined).decode()
 
 
 def decrypt_data(encrypted_b64: str, master_password: str) -> str:
-    """
-    Decrypt data that was encrypted with encrypt_data().
-    Uses pyaes.Decrypter, which strips PKCS#7 padding automatically.
-    """
+    """Decrypt data encrypted with encrypt_data()."""
     combined = base64.b64decode(encrypted_b64)
     salt = combined[:SALT_LEN]
     iv = combined[SALT_LEN:SALT_LEN + IV_LEN]
     ciphertext = combined[SALT_LEN + IV_LEN:]
 
     key = derive_key(master_password, salt)
-
-    # Create the CBC mode and the decrypter
     mode = pyaes.AESModeOfOperationCBC(key, iv)
     decrypter = pyaes.Decrypter(mode)
 
-    # Feed the ciphertext
     plaintext_padded = decrypter.feed(ciphertext)
-
-    # Finalise (strips padding)
-    plaintext_padded += decrypter.feed()
+    plaintext_padded += decrypter.feed()  # finalise (strips padding)
 
     return plaintext_padded.decode('utf-8')
 
@@ -140,20 +127,24 @@ class DuinoWallet:
         url = f"{API_BASE}/{endpoint}"
         async with self.session.get(url, params=params) as resp:
             if resp.status != 200:
-                raise Exception(f"HTTP {resp.status}: {await resp.text()}")
+                text = await resp.text()
+                raise Exception(f"HTTP {resp.status}: {text}")
             data = await resp.json()
             if not data.get("success", False):
-                raise Exception(f"API error: {data.get('error', 'Unknown error')}")
+                error_msg = data.get("error", "Unknown error")
+                raise Exception(f"API error: {error_msg}")
             return data.get("result", data)
 
     async def _post(self, endpoint: str, params: dict = None) -> dict:
         url = f"{API_BASE}/{endpoint}"
         async with self.session.post(url, params=params) as resp:
             if resp.status != 200:
-                raise Exception(f"HTTP {resp.status}: {await resp.text()}")
+                text = await resp.text()
+                raise Exception(f"HTTP {resp.status}: {text}")
             data = await resp.json()
             if not data.get("success", False):
-                raise Exception(f"API error: {data.get('error', 'Unknown error')}")
+                error_msg = data.get("error", "Unknown error")
+                raise Exception(f"API error: {error_msg}")
             return data.get("result", data)
 
     # ---------- API endpoints ----------
@@ -169,7 +160,7 @@ class DuinoWallet:
         result = await self._get(f"miners/{self.username}")
         return result
 
-    async def send_duco(self, recipient: str, amount: float, memo: str = "") -> dict:
+    async def send_duco(self, recipient: str, amount: float, memo: str = ""):
         params = {
             "username": self.username,
             "password": self.password,
@@ -177,6 +168,8 @@ class DuinoWallet:
             "amount": str(amount),
             "memo": memo
         }
+        # The transaction endpoint may return a string (e.g., "Transaction sent")
+        # or a dict with an 'id'. We'll return whatever we get.
         result = await self._get("transaction", params)
         return result
 
@@ -258,16 +251,20 @@ class DuinoWallet:
                             print()
 
                 elif choice == "3":
-                    miners = await self.get_miners()
-                    if not miners:
-                        print("No miners found.")
-                    else:
-                        for m in miners:
-                            print(f"{Fore.YELLOW}Identifier: {m['identifier']}{Style.RESET_ALL}")
-                            print(f"  Algorithm: {m['algorithm']}, Hashrate: {m['hashrate']} H/s")
-                            print(f"  Accepted: {m['accepted']}, Rejected: {m['rejected']}")
-                            print(f"  Software: {m['software']}")
-                            print()
+                    try:
+                        miners = await self.get_miners()
+                        if not miners:
+                            print("No miners found.")
+                        else:
+                            for m in miners:
+                                print(f"{Fore.YELLOW}Identifier: {m['identifier']}{Style.RESET_ALL}")
+                                print(f"  Algorithm: {m['algorithm']}, Hashrate: {m['hashrate']} H/s")
+                                print(f"  Accepted: {m['accepted']}, Rejected: {m['rejected']}")
+                                print(f"  Software: {m['software']}")
+                                print()
+                    except Exception as e:
+                        # If the API returns an error, show it
+                        print(Fore.RED + f"Could not fetch miners: {e}" + Style.RESET_ALL)
 
                 elif choice == "4":
                     recipient = input("Recipient username: ").strip()
@@ -280,7 +277,13 @@ class DuinoWallet:
                     memo = input("Memo (optional): ").strip()
                     try:
                         result = await self.send_duco(recipient, amount, memo)
-                        print(Fore.GREEN + f"Transaction sent! ID: {result.get('id', 'N/A')}" + Style.RESET_ALL)
+                        # result can be a dict (with 'id') or a string (confirmation)
+                        if isinstance(result, dict):
+                            tx_id = result.get('id', 'N/A')
+                            print(Fore.GREEN + f"Transaction sent! ID: {tx_id}" + Style.RESET_ALL)
+                        else:
+                            # It's a string message
+                            print(Fore.GREEN + str(result) + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"Send failed: {e}" + Style.RESET_ALL)
 
@@ -303,28 +306,38 @@ class DuinoWallet:
                         continue
                     try:
                         result = await self.buy_shop_item(int(item_id))
-                        print(Fore.GREEN + f"Purchase successful: {result}" + Style.RESET_ALL)
+                        # result could be a string or dict
+                        if isinstance(result, dict):
+                            print(Fore.GREEN + f"Purchase successful: {result}" + Style.RESET_ALL)
+                        else:
+                            print(Fore.GREEN + str(result) + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"Buy failed: {e}" + Style.RESET_ALL)
 
                 elif choice == "7":
-                    stats = await self.get_statistics()
-                    print(Fore.CYAN + "Server Statistics:" + Style.RESET_ALL)
-                    for key, value in stats.items():
-                        if isinstance(value, (list, dict)):
-                            continue
-                        print(f"  {key}: {value}")
-                    if "Top 10 richest miners" in stats:
-                        print("  Top 10 richest miners:")
-                        for line in stats["Top 10 richest miners"]:
-                            print(f"    {line}")
+                    try:
+                        stats = await self.get_statistics()
+                        print(Fore.CYAN + "Server Statistics:" + Style.RESET_ALL)
+                        for key, value in stats.items():
+                            if isinstance(value, (list, dict)):
+                                continue
+                            print(f"  {key}: {value}")
+                        if "Top 10 richest miners" in stats:
+                            print("  Top 10 richest miners:")
+                            for line in stats["Top 10 richest miners"]:
+                                print(f"    {line}")
+                    except Exception as e:
+                        print(Fore.RED + f"Could not fetch statistics: {e}" + Style.RESET_ALL)
 
                 elif choice == "8":
                     mk = input("Enter new mining key (or leave blank to check current): ").strip()
                     if mk:
                         try:
                             result = await self.set_mining_key(mk)
-                            print(Fore.GREEN + f"Mining key updated: {result}" + Style.RESET_ALL)
+                            if isinstance(result, dict):
+                                print(Fore.GREEN + f"Mining key updated: {result}" + Style.RESET_ALL)
+                            else:
+                                print(Fore.GREEN + str(result) + Style.RESET_ALL)
                         except Exception as e:
                             print(Fore.RED + f"Failed to set mining key: {e}" + Style.RESET_ALL)
                     else:
@@ -346,7 +359,7 @@ class DuinoWallet:
                     print(Fore.RED + "Invalid option." + Style.RESET_ALL)
 
             except Exception as e:
-                print(Fore.RED + f"Error: {e}" + Style.RESET_ALL)
+                print(Fore.RED + f"Unexpected error: {e}" + Style.RESET_ALL)
 
 
 async def main():
