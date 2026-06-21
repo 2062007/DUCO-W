@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Duino-Coin Interactive Wallet – Premium UI
+Duino-Coin Interactive Wallet – Compact UI
 Pure Python, async, using aiohttp and pyaes.
-Features ASCII logo, framed menus, and HTTPS.
+Uses HTTPS and a clean framed layout.
 """
 
 import asyncio
@@ -22,42 +22,6 @@ API_BASE = "https://server.duinocoin.com"
 WALLET_FILE = "wallet.dat"
 SALT_LEN = 16
 IV_LEN = 16
-
-# ASCII art logo (Duino-Coin) – updated
-LOGO = r"""
-                    =+++++++++++++++++                     
-                +++++++++++++++++++++++++++                
-             +++++++++++++++++++++++++++++++++             
-           +++++++++++++++++++++++++++++++++++++           
-         +++++++++++++++++++++++++++++++++++++++++         
-       +++++++++++++++++++++++++++++++++++++++++++++       
-     =+++++++++++++++++++++++++++++++++++++++++++++++      
-    +++++++++++++-::::::::::::::::--=++++++++++++++++++    
-   ++++++++++++++.                   .:=+++++++++++++++    
-  =++++++++++++++................       .=++++++++++++++   
-  +++++++++++++++================-:.     .-++++++++++++++  
- ++++++++++++++++:............:=+++=-.    .:++++++++++++++ 
- ++++++++++++++++:             .:++++=:    .-+++++++++++++ 
-+++++++++++++++++-::::::::::.    :+++++.    .=++++++++++++ 
-++++++++++++++++++++++++++++=.    -++++=.    -+++++++++++++
-+++++++++++++++++++++++++++++=    :++++=.    :+++++++++++++
-+++++++++++++++++++++++++++++=    :++++=.    :+++++++++++++
-++++++++++++++++++++++++++++=.    =++++-.    -+++++++++++++
-+++++++++++++++++-::::::::::.    :++++=.    .+++++++++++++ 
- ++++++++++++++++.             .-++++=:    .-+++++++++++++ 
- ++++++++++++++++:...........:-++++=-.    .-++++++++++++++ 
-  +++++++++++++++===============--.      .-++++++++++++++  
-   ++++++++++++++...............        :+++++++++++++++   
-   ++++++++++++++.                   .-++++++++++++++++    
-    +++++++++++++-:::::::::::::::--==+++++++++++++++++     
-      +++++++++++++++++++++++++++++++++++++++++++++++      
-       +++++++++++++++++++++++++++++++++++++++++++++       
-         +++++++++++++++++++++++++++++++++++++++++         
-           +++++++++++++++++++++++++++++++++++++           
-             =+++++++++++++++++++++++++++++++              
-                =++++++++++++++++++++++++++                
-                     +++++++++++++++++                     
-"""
 
 # ---------- Utilities ----------
 def derive_key(master_password: str, salt: bytes) -> bytes:
@@ -113,7 +77,7 @@ def format_number(num):
     return str(num)
 
 
-def print_frame(title, content_lines, width=80, show_border=True):
+def print_frame(title, content_lines, width=70, show_border=True):
     """Draw a framed box with a title and content lines."""
     if show_border:
         border = '+' + '-' * (width - 2) + '+'
@@ -188,7 +152,7 @@ class DuinoWallet:
         self.password = password
         self.master_password = master_password
         await self.save_wallet(master_password)
-        print(Fore.GREEN + f"Wallet created for {username}." + Style.RESET_ALL)
+        print(Fore.GREEN + f"Wallet saved for {username}." + Style.RESET_ALL)
 
     async def _request(self, method: str, endpoint: str, params: dict = None):
         url = f"{API_BASE}/{endpoint}"
@@ -280,12 +244,12 @@ class DuinoWallet:
                 return
         else:
             clear_screen()
-            print(Fore.CYAN + "No wallet found. Creating a new wallet." + Style.RESET_ALL)
+            print(Fore.CYAN + "No saved wallet found. Please set up your wallet." + Style.RESET_ALL)
             username = input("Duino-Coin username: ")
             password = input("Duino-Coin password: ")
             master = input("Set master password (for this wallet): ")
             await self.create_wallet(username, password, master)
-            print(Fore.GREEN + "Wallet created successfully!" + Style.RESET_ALL)
+            print(Fore.GREEN + "Wallet saved successfully!" + Style.RESET_ALL)
             input("Press Enter to continue...")
 
         # Main loop
@@ -297,11 +261,6 @@ class DuinoWallet:
                 balance_str = f"{format_number(bal)} DUCO"
             except:
                 balance_str = "?"
-
-            # Build the main screen content
-            logo_lines = LOGO.splitlines()
-            # Center the logo (optional)
-            centered_logo = [line.center(80) for line in logo_lines]
 
             header_line = f"{Fore.CYAN}◆ Duino-Coin Wallet {Style.RESET_ALL}│ {Fore.GREEN}{self.username}{Style.RESET_ALL} │ Balance: {Fore.YELLOW}{balance_str}{Style.RESET_ALL}"
             menu_lines = [
@@ -316,12 +275,10 @@ class DuinoWallet:
                 " 9. Exit"
             ]
 
-            # Combine: logo, separator, header, menu
-            content = centered_logo + [""] + [header_line] + [""] + menu_lines
+            # Just header + menu
+            content = [header_line, ""] + menu_lines
+            print_frame("", content, width=70, show_border=False)
 
-            print_frame("", content, width=80, show_border=False)
-
-            # Prompt
             choice = input(Fore.CYAN + "Select option: " + Style.RESET_ALL).strip()
 
             try:
