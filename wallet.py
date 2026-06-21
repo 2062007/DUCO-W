@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Duino-Coin Interactive Wallet
+Duino-Coin Interactive Wallet – Framed UI
 Pure Python, async, using aiohttp and pyaes (BlockFeeder API).
-Uses HTTPS for secure communication.
+Uses HTTPS and colorama for a polished terminal interface.
 """
 
 import asyncio
@@ -17,7 +17,7 @@ from datetime import datetime
 
 import pyaes
 import colorama
-from colorama import Fore, Style
+from colorama import Fore, Style, init
 
 # Constants
 API_BASE = "https://server.duinocoin.com"
@@ -68,6 +68,27 @@ def decrypt_data(encrypted_b64: str, master_password: str) -> str:
     plaintext_padded += decrypter.feed()  # finalise (strips padding)
 
     return plaintext_padded.decode('utf-8')
+
+
+def clear_screen():
+    """Clear the terminal screen."""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+
+def print_frame(title: str, content_lines: list, width: int = 60):
+    """Print a framed box with a title and content lines."""
+    border = Fore.CYAN + '+' + '-' * (width - 2) + '+' + Style.RESET_ALL
+    print(border)
+    # Title line
+    title_line = f"| {Fore.YELLOW}{title}{Style.RESET_ALL}"
+    print(title_line + ' ' * (width - len(title_line) - 1) + '|')
+    print(Fore.CYAN + '|' + '-' * (width - 2) + '|' + Style.RESET_ALL)
+    for line in content_lines:
+        # Truncate if too long
+        if len(line) > width - 4:
+            line = line[:width - 7] + '...'
+        print(f"| {line.ljust(width - 4)} |")
+    print(border)
 
 
 class DuinoWallet:
@@ -221,171 +242,233 @@ class DuinoWallet:
 
     # ---------- Interactive menu ----------
     async def run(self):
-        colorama.init(autoreset=True)
+        init(autoreset=True)
 
+        # Unlock or create wallet
         if os.path.exists(WALLET_FILE):
+            clear_screen()
             print(Fore.CYAN + "Duino-Coin Wallet" + Style.RESET_ALL)
             master = input("Enter master password: ")
             if not await self.load_wallet(master):
                 print(Fore.RED + "Invalid master password or corrupted wallet." + Style.RESET_ALL)
                 return
-            print(Fore.GREEN + f"Welcome back, {self.username}!" + Style.RESET_ALL)
         else:
+            clear_screen()
             print(Fore.CYAN + "No wallet found. Creating a new wallet." + Style.RESET_ALL)
             username = input("Duino-Coin username: ")
             password = input("Duino-Coin password: ")
             master = input("Set master password (for this wallet): ")
             await self.create_wallet(username, password, master)
             print(Fore.GREEN + "Wallet created successfully!" + Style.RESET_ALL)
+            input("Press Enter to continue...")
 
+        # Main loop
         while True:
-            print("\n" + Fore.CYAN + "=== Main Menu ===" + Style.RESET_ALL)
-            print("1. View balance")
-            print("2. View recent transactions")
-            print("3. View my miners")
-            print("4. Send DUCO")
-            print("5. View shop items")
-            print("6. Buy shop item")
-            print("7. View statistics")
-            print("8. Set mining key")
-            print("9. Exit")
-            choice = input("Select option: ").strip()
+            clear_screen()
+            # Fetch balance for header
+            try:
+                bal = await self.get_balance()
+                balance_str = f"{bal:.8f} DUCO"
+            except:
+                balance_str = "?"
+
+            # Build header
+            header = f"  {Fore.CYAN}Duino-Coin Wallet{Style.RESET_ALL}  |  {Fore.GREEN}{self.username}{Style.RESET_ALL}  |  Balance: {Fore.YELLOW}{balance_str}{Style.RESET_ALL}"
+
+            # Menu options
+            menu_lines = [
+                "1. View balance",
+                "2. View recent transactions",
+                "3. View my miners",
+                "4. Send DUCO",
+                "5. View shop items",
+                "6. Buy shop item",
+                "7. View statistics",
+                "8. Set mining key",
+                "9. Exit"
+            ]
+            # Frame it with the header
+            print_frame(header, menu_lines, width=70)
+            choice = input(Fore.CYAN + "Select option: " + Style.RESET_ALL).strip()
 
             try:
                 if choice == "1":
                     bal = await self.get_balance()
-                    print(Fore.GREEN + f"Balance: {bal:.8f} DUCO" + Style.RESET_ALL)
+                    clear_screen()
+                    print_frame("Balance", [f"{Fore.GREEN}{bal:.8f} DUCO{Style.RESET_ALL}"], width=50)
+                    input("Press Enter to continue...")
 
                 elif choice == "2":
                     limit = input("Number of transactions to show (default 5): ").strip()
                     limit = int(limit) if limit.isdigit() else 5
                     txs = await self.get_transactions(limit)
+                    clear_screen()
                     if not txs:
-                        print("No transactions found.")
+                        print_frame("Recent Transactions", ["No transactions found."], width=60)
                     else:
+                        lines = []
                         for tx in txs:
-                            print(f"{Fore.YELLOW}ID: {tx['id']} | {tx['datetime']}{Style.RESET_ALL}")
-                            print(f"  {tx['sender']} -> {tx['recipient']} : {tx['amount']} DUCO")
-                            print(f"  Memo: {tx.get('memo', 'None')}")
-                            print()
+                            lines.append(f"{Fore.YELLOW}ID:{tx['id']}{Style.RESET_ALL}  {tx['datetime']}")
+                            lines.append(f"  {tx['sender']} -> {tx['recipient']} : {Fore.GREEN}{tx['amount']} DUCO{Style.RESET_ALL}")
+                            lines.append(f"  Memo: {tx.get('memo', 'None')}")
+                            lines.append("")
+                        print_frame("Recent Transactions", lines, width=70)
+                    input("Press Enter to continue...")
 
                 elif choice == "3":
+                    clear_screen()
                     try:
                         miners = await self.get_miners()
                         if not miners:
-                            print("No miners active.")
+                            print_frame("My Miners", ["No miners active."], width=50)
                         else:
+                            lines = []
                             for m in miners:
-                                print(f"{Fore.YELLOW}Identifier: {m['identifier']}{Style.RESET_ALL}")
-                                print(f"  Algorithm: {m['algorithm']}, Hashrate: {m['hashrate']} H/s")
-                                print(f"  Accepted: {m['accepted']}, Rejected: {m['rejected']}")
-                                print(f"  Software: {m['software']}")
-                                print()
+                                lines.append(f"{Fore.YELLOW}Identifier: {m['identifier']}{Style.RESET_ALL}")
+                                lines.append(f"  Algorithm: {m['algorithm']}, Hashrate: {Fore.CYAN}{m['hashrate']} H/s{Style.RESET_ALL}")
+                                lines.append(f"  Accepted: {Fore.GREEN}{m['accepted']}{Style.RESET_ALL}, Rejected: {Fore.RED}{m['rejected']}{Style.RESET_ALL}")
+                                lines.append(f"  Software: {m['software']}")
+                                lines.append("")
+                            print_frame("My Miners", lines, width=70)
                     except Exception as e:
-                        print(Fore.RED + f"Could not fetch miners: {e}" + Style.RESET_ALL)
+                        print_frame("My Miners", [f"{Fore.RED}Could not fetch miners: {e}{Style.RESET_ALL}"], width=60)
+                    input("Press Enter to continue...")
 
                 elif choice == "4":
+                    clear_screen()
+                    print_frame("Send DUCO", ["Enter recipient and amount."], width=50)
                     recipient = input("Recipient username: ").strip()
                     amount = input("Amount to send: ").strip()
                     try:
                         amount = float(amount)
                     except ValueError:
                         print(Fore.RED + "Invalid amount." + Style.RESET_ALL)
+                        input("Press Enter to continue...")
                         continue
                     memo = input("Memo (optional): ").strip()
                     try:
                         result = await self.send_duco(recipient, amount, memo)
                         if isinstance(result, dict):
                             tx_id = result.get('id', 'N/A')
-                            print(Fore.GREEN + f"Transaction sent! ID: {tx_id}" + Style.RESET_ALL)
+                            msg = f"Transaction sent! ID: {Fore.GREEN}{tx_id}{Style.RESET_ALL}"
                         else:
-                            # Plain response: parse hash if present
                             msg = str(result)
                             if "Successfully transferred" in msg:
-                                # Extract hash from end of string
                                 parts = msg.split(',')
                                 if len(parts) >= 3:
                                     tx_hash = parts[-1].strip()
-                                    print(Fore.GREEN + f"Transaction sent! Hash: {tx_hash}" + Style.RESET_ALL)
+                                    msg = f"Transaction sent! Hash: {Fore.GREEN}{tx_hash}{Style.RESET_ALL}"
                                 else:
-                                    print(Fore.GREEN + msg + Style.RESET_ALL)
+                                    msg = Fore.GREEN + msg + Style.RESET_ALL
                             else:
-                                print(Fore.GREEN + msg + Style.RESET_ALL)
+                                msg = Fore.GREEN + msg + Style.RESET_ALL
+                        clear_screen()
+                        print_frame("Send DUCO", [msg], width=60)
                     except Exception as e:
-                        print(Fore.RED + f"Send failed: {e}" + Style.RESET_ALL)
+                        clear_screen()
+                        print_frame("Send DUCO", [f"{Fore.RED}Send failed: {e}{Style.RESET_ALL}"], width=60)
+                    input("Press Enter to continue...")
 
                 elif choice == "5":
+                    clear_screen()
                     items = await self.get_shop_items()
                     if not items:
-                        print("No shop items available.")
+                        print_frame("Shop Items", ["No items available."], width=50)
                     else:
+                        lines = []
                         for idx, item in items.items():
-                            print(f"{Fore.YELLOW}ID: {idx}{Style.RESET_ALL}")
-                            print(f"  Name: {item['name']}")
-                            print(f"  Price: {item['price']} DUCO")
-                            print(f"  Description: {item['description']}")
-                            print()
+                            lines.append(f"{Fore.YELLOW}ID: {idx}{Style.RESET_ALL}")
+                            lines.append(f"  Name: {Fore.CYAN}{item['name']}{Style.RESET_ALL}")
+                            lines.append(f"  Price: {Fore.GREEN}{item['price']} DUCO{Style.RESET_ALL}")
+                            lines.append(f"  {item['description']}")
+                            lines.append("")
+                        print_frame("Shop Items", lines, width=70)
+                    input("Press Enter to continue...")
 
                 elif choice == "6":
-                    item_id = input("Enter item ID to buy: ").strip()
+                    clear_screen()
+                    print_frame("Buy Shop Item", ["Enter item ID to purchase."], width=50)
+                    item_id = input("Enter item ID: ").strip()
                     if not item_id.isdigit():
                         print(Fore.RED + "Invalid item ID." + Style.RESET_ALL)
+                        input("Press Enter to continue...")
                         continue
                     try:
                         result = await self.buy_shop_item(int(item_id))
                         if isinstance(result, dict):
-                            print(Fore.GREEN + f"Purchase successful: {result}" + Style.RESET_ALL)
+                            msg = f"Purchase successful: {result}"
                         else:
-                            print(Fore.GREEN + str(result) + Style.RESET_ALL)
+                            msg = str(result)
+                        clear_screen()
+                        print_frame("Buy Shop Item", [Fore.GREEN + msg + Style.RESET_ALL], width=60)
                     except Exception as e:
-                        print(Fore.RED + f"Buy failed: {e}" + Style.RESET_ALL)
+                        clear_screen()
+                        print_frame("Buy Shop Item", [f"{Fore.RED}Buy failed: {e}{Style.RESET_ALL}"], width=60)
+                    input("Press Enter to continue...")
 
                 elif choice == "7":
+                    clear_screen()
                     try:
                         stats = await self.get_statistics()
-                        print(Fore.CYAN + "Server Statistics:" + Style.RESET_ALL)
+                        lines = []
                         for key, value in stats.items():
                             if isinstance(value, (list, dict)):
                                 continue
-                            print(f"  {key}: {value}")
+                            lines.append(f"{Fore.CYAN}{key}:{Style.RESET_ALL} {value}")
                         if "Top 10 richest miners" in stats:
-                            print("  Top 10 richest miners:")
+                            lines.append("")
+                            lines.append(f"{Fore.YELLOW}Top 10 richest miners:{Style.RESET_ALL}")
                             for line in stats["Top 10 richest miners"]:
-                                print(f"    {line}")
+                                lines.append(f"  {line}")
+                        print_frame("Server Statistics", lines, width=70)
                     except Exception as e:
-                        print(Fore.RED + f"Could not fetch statistics: {e}" + Style.RESET_ALL)
+                        print_frame("Server Statistics", [f"{Fore.RED}Could not fetch statistics: {e}{Style.RESET_ALL}"], width=60)
+                    input("Press Enter to continue...")
 
                 elif choice == "8":
-                    mk = input("Enter new mining key (or leave blank to check current): ").strip()
+                    clear_screen()
+                    print_frame("Mining Key", ["Enter new key or leave blank to check current."], width=60)
+                    mk = input("New mining key (or blank to verify): ").strip()
                     if mk:
                         try:
                             result = await self.set_mining_key(mk)
-                            if isinstance(result, dict):
-                                print(Fore.GREEN + f"Mining key updated: {result}" + Style.RESET_ALL)
-                            else:
-                                print(Fore.GREEN + str(result) + Style.RESET_ALL)
+                            msg = f"Mining key updated: {result}"
+                            clear_screen()
+                            print_frame("Mining Key", [Fore.GREEN + msg + Style.RESET_ALL], width=60)
                         except Exception as e:
-                            print(Fore.RED + f"Failed to set mining key: {e}" + Style.RESET_ALL)
+                            clear_screen()
+                            print_frame("Mining Key", [f"{Fore.RED}Failed to set mining key: {e}{Style.RESET_ALL}"], width=60)
                     else:
                         test_key = input("Enter the mining key to verify: ").strip()
                         try:
                             has = await self.check_mining_key(test_key)
                             if has:
-                                print(Fore.GREEN + "Mining key is correct." + Style.RESET_ALL)
+                                msg = "Mining key is correct."
                             else:
-                                print(Fore.RED + "Mining key is incorrect or not set." + Style.RESET_ALL)
+                                msg = "Mining key is incorrect or not set."
+                            clear_screen()
+                            if has:
+                                print_frame("Mining Key", [Fore.GREEN + msg + Style.RESET_ALL], width=60)
+                            else:
+                                print_frame("Mining Key", [Fore.RED + msg + Style.RESET_ALL], width=60)
                         except Exception as e:
-                            print(Fore.RED + f"Check failed: {e}" + Style.RESET_ALL)
+                            clear_screen()
+                            print_frame("Mining Key", [f"{Fore.RED}Check failed: {e}{Style.RESET_ALL}"], width=60)
+                    input("Press Enter to continue...")
 
                 elif choice == "9":
-                    print("Goodbye!")
+                    clear_screen()
+                    print(Fore.CYAN + "Goodbye!" + Style.RESET_ALL)
                     break
 
                 else:
                     print(Fore.RED + "Invalid option." + Style.RESET_ALL)
+                    input("Press Enter to continue...")
 
             except Exception as e:
-                print(Fore.RED + f"Unexpected error: {e}" + Style.RESET_ALL)
+                clear_screen()
+                print_frame("Error", [f"{Fore.RED}Unexpected error: {e}{Style.RESET_ALL}"], width=60)
+                input("Press Enter to continue...")
 
 
 async def main():
