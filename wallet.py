@@ -109,9 +109,6 @@ class DuinoWallet:
         self.password = None
         self.session = None
         self.master_password = None
-        # Cached balance and last check time
-        self.cached_balance = None
-        self.last_check_time = None
 
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -271,18 +268,9 @@ class DuinoWallet:
         # Main loop
         while True:
             clear_screen()
-            # Build header – use cached balance if available, else placeholder
-            if self.cached_balance is not None:
-                bal_str = f"{format_number(self.cached_balance)} DUCO"
-                if self.last_check_time:
-                    time_str = self.last_check_time.strftime("%d-%m-%Y %H:%M:%S")
-                    balance_display = f"{bal_str} (last check: {time_str})"
-                else:
-                    balance_display = bal_str
-            else:
-                balance_display = "-- (check with option 1)"
 
-            header_line = f"{Fore.CYAN}◆ Duino-Coin Wallet {Style.RESET_ALL}│ {Fore.GREEN}{self.username}{Style.RESET_ALL} │ Balance: {Fore.YELLOW}{balance_display}{Style.RESET_ALL}"
+            # Header without balance
+            header_line = f"{Fore.CYAN}◆ Duino-Coin Wallet {Style.RESET_ALL}│ {Fore.GREEN}{self.username}{Style.RESET_ALL}"
             menu_lines = [
                 " 1. View balance",
                 " 2. View recent transactions",
@@ -302,20 +290,10 @@ class DuinoWallet:
 
             try:
                 if choice == "1":
-                    try:
-                        bal = await self.get_balance()
-                        self.cached_balance = bal
-                        self.last_check_time = datetime.now()
-                        # Continue the loop – the header will now show updated balance
-                    except Exception as e:
-                        # Show error in the header temporarily
-                        self.cached_balance = None
-                        self.last_check_time = None
-                        # We'll show the error as a message; we can handle it by printing an error frame
-                        clear_screen()
-                        print_frame("Error", [Fore.RED + f"Failed to fetch balance: {e}" + Style.RESET_ALL], width=60)
-                        input("Press Enter to continue...")
-                        continue
+                    bal = await self.get_balance()
+                    clear_screen()
+                    print_frame("Balance", [f"{format_number(bal)} DUCO"], width=50)
+                    input("Press Enter to continue...")
 
                 elif choice == "2":
                     limit = input("Number of transactions to show (default 5): ").strip()
