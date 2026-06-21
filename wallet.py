@@ -21,7 +21,7 @@ import colorama
 from colorama import Fore, Style
 
 # Constants
-API_BASE = "https://server.duinocoin.com"   # <-- now using HTTPS
+API_BASE = "https://server.duinocoin.com"   # HTTPS now
 WALLET_FILE = "wallet.dat"
 SALT_LEN = 16
 IV_LEN = 16
@@ -44,11 +44,17 @@ def encrypt_data(data: str, master_password: str) -> str:
     plaintext = data.encode('utf-8')
     pad_len = 16 - (len(plaintext) % 16)
     if pad_len == 0:
-        pad_len = 16  # add a full block of padding
+        pad_len = 16
     padded = plaintext + bytes([pad_len]) * pad_len
 
-    aes = pyaes.AESModeOfOperationCBC(key, iv)
-    ciphertext = aes.encrypt(padded)
+    # --- DEBUG: check length ---
+    print(f"[DEBUG] plaintext length: {len(plaintext)}, pad_len: {pad_len}, padded length: {len(padded)}")
+    if len(padded) % 16 != 0:
+        raise ValueError(f"Padded length {len(padded)} is not a multiple of 16!")
+
+    # Encrypt using pyaes CBC mode
+    cipher = pyaes.AESModeOfOperationCBC(key, iv)
+    ciphertext = cipher.encrypt(padded)
 
     combined = salt + iv + ciphertext
     return base64.b64encode(combined).decode()
@@ -62,8 +68,8 @@ def decrypt_data(encrypted_b64: str, master_password: str) -> str:
     ciphertext = combined[SALT_LEN + IV_LEN:]
 
     key = derive_key(master_password, salt)
-    aes = pyaes.AESModeOfOperationCBC(key, iv)
-    plaintext_padded = aes.decrypt(ciphertext)
+    cipher = pyaes.AESModeOfOperationCBC(key, iv)
+    plaintext_padded = cipher.decrypt(ciphertext)
 
     # Remove PKCS#7 padding
     pad_len = plaintext_padded[-1]
@@ -74,9 +80,9 @@ def decrypt_data(encrypted_b64: str, master_password: str) -> str:
 class DuinoWallet:
     def __init__(self):
         self.username = None
-        self.password = None  # plaintext, kept in memory after unlock
+        self.password = None
         self.session = None
-        self.master_password = None  # only used during unlock/create
+        self.master_password = None
 
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -88,7 +94,6 @@ class DuinoWallet:
 
     # ---------- Wallet file operations ----------
     async def load_wallet(self, master_password: str) -> bool:
-        """Load and decrypt wallet file. Returns True on success."""
         if not os.path.exists(WALLET_FILE):
             return False
         try:
@@ -105,11 +110,11 @@ class DuinoWallet:
             self.password = parts[1].strip()
             self.master_password = master_password
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[DEBUG] Load error: {e}")
             return False
 
     async def save_wallet(self, master_password: str) -> None:
-        """Encrypt and save wallet data."""
         if not self.username or not self.password:
             raise ValueError("Username and password must be set")
         plain = f"{self.username}\n{self.password}"
@@ -118,7 +123,6 @@ class DuinoWallet:
             json.dump({"encrypted": encrypted}, f)
 
     async def create_wallet(self, username: str, password: str, master_password: str) -> None:
-        """Create a new wallet file."""
         self.username = username
         self.password = password
         self.master_password = master_password
@@ -127,7 +131,6 @@ class DuinoWallet:
 
     # ---------- API helpers ----------
     async def _get(self, endpoint: str, params: dict = None) -> dict:
-        """Perform a GET request and return JSON result."""
         url = f"{API_BASE}/{endpoint}"
         async with self.session.get(url, params=params) as resp:
             if resp.status != 200:
@@ -138,7 +141,6 @@ class DuinoWallet:
             return data.get("result", data)
 
     async def _post(self, endpoint: str, params: dict = None) -> dict:
-        """Perform a POST request with parameters."""
         url = f"{API_BASE}/{endpoint}"
         async with self.session.post(url, params=params) as resp:
             if resp.status != 200:
@@ -150,22 +152,18 @@ class DuinoWallet:
 
     # ---------- API endpoints ----------
     async def get_balance(self) -> float:
-        """Return user's balance."""
         result = await self._get(f"balances/{self.username}")
         return result["balance"]
 
     async def get_transactions(self, limit: int = 5) -> list:
-        """Return recent transactions (up to limit)."""
         result = await self._get(f"user_transactions/{self.username}", {"limit": limit})
-        return result  # list of transactions
+        return result
 
     async def get_miners(self) -> list:
-        """Return user's miners."""
         result = await self._get(f"miners/{self.username}")
-        return result  # list of miners
+        return result
 
     async def send_duco(self, recipient: str, amount: float, memo: str = "") -> dict:
-        """Send DUCO to another user. Returns transaction info."""
         params = {
             "username": self.username,
             "password": self.password,
@@ -177,25 +175,19 @@ class DuinoWallet:
         return result
 
     async def get_shop_items(self) -> dict:
-        """Return all shop items."""
         result = await self._get("shop_items")
-        return result  # dict of items
+        return result
 
     async def buy_shop_item(self, item_id: int) -> dict:
-        """Buy a shop item."""
-        params = {
-            "password": self.password
-        }
+        params = {"password": self.password}
         result = await self._get(f"shop_buy/{self.username}", params)
         return result
 
     async def get_statistics(self) -> dict:
-        """Return server statistics."""
         result = await self._get("statistics")
         return result
 
     async def set_mining_key(self, mining_key: str) -> dict:
-        """Set or update the user's mining key."""
         params = {
             "u": self.username,
             "k": mining_key,
@@ -205,20 +197,14 @@ class DuinoWallet:
         return result
 
     async def check_mining_key(self, mining_key: str) -> bool:
-        """Check if the given mining key is correct for the user."""
-        params = {
-            "u": self.username,
-            "k": mining_key
-        }
+        params = {"u": self.username, "k": mining_key}
         result = await self._get("mining_key", params)
         return result.get("has_key", False)
 
     # ---------- Interactive menu ----------
     async def run(self):
-        """Main interactive loop."""
         colorama.init(autoreset=True)
 
-        # Unlock or create wallet
         if os.path.exists(WALLET_FILE):
             print(Fore.CYAN + "Duino-Coin Wallet" + Style.RESET_ALL)
             master = input("Enter master password: ")
@@ -234,7 +220,6 @@ class DuinoWallet:
             await self.create_wallet(username, password, master)
             print(Fore.GREEN + "Wallet created successfully!" + Style.RESET_ALL)
 
-        # Main menu
         while True:
             print("\n" + Fore.CYAN + "=== Main Menu ===" + Style.RESET_ALL)
             print("1. View balance")
