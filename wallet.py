@@ -226,7 +226,8 @@ class DuinoWallet:
         return result
 
     async def buy_shop_item(self, item_id: int) -> dict:
-        params = {"password": self.password}
+        # FIX: added "item" parameter as required by API
+        params = {"password": self.password, "item": item_id}
         result = await self._get(f"shop_buy/{self.username}", params)
         return result
 
