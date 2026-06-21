@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Duino-Coin Interactive Wallet – Framed UI
-Pure Python, async, using aiohttp and pyaes (BlockFeeder API).
-Uses HTTPS and colorama for a polished terminal interface.
+Duino-Coin Interactive Wallet – Clean UI
+Pure Python, async, using aiohttp and pyaes.
+Uses HTTPS and minimal color for clarity.
 """
 
 import asyncio
@@ -12,7 +12,6 @@ import hashlib
 import os
 import base64
 import sys
-import time
 from datetime import datetime
 
 import pyaes
@@ -24,20 +23,14 @@ API_BASE = "https://server.duinocoin.com"
 WALLET_FILE = "wallet.dat"
 SALT_LEN = 16
 IV_LEN = 16
-KEY_LEN = 32  # AES-256
 
 
 def derive_key(master_password: str, salt: bytes) -> bytes:
-    """Derive a 32-byte AES key using SHA-256 of master_password + salt."""
     data = master_password.encode() + salt
     return hashlib.sha256(data).digest()
 
 
 def encrypt_data(data: str, master_password: str) -> str:
-    """
-    Encrypt a string with AES-256-CBC using pyaes.Encrypter (PKCS#7 padding).
-    Returns base64(salt + iv + ciphertext).
-    """
     salt = os.urandom(SALT_LEN)
     iv = os.urandom(IV_LEN)
     key = derive_key(master_password, salt)
@@ -47,48 +40,57 @@ def encrypt_data(data: str, master_password: str) -> str:
 
     plaintext = data.encode('utf-8')
     ciphertext = encrypter.feed(plaintext)
-    ciphertext += encrypter.feed()  # finalise with padding
+    ciphertext += encrypter.feed()
 
     combined = salt + iv + ciphertext
     return base64.b64encode(combined).decode()
 
 
 def decrypt_data(encrypted_b64: str, master_password: str) -> str:
-    """Decrypt data encrypted with encrypt_data()."""
     combined = base64.b64decode(encrypted_b64)
     salt = combined[:SALT_LEN]
-    iv = combined[SALT_LEN:SALT_LEN + IV_LEN]
-    ciphertext = combined[SALT_LEN + IV_LEN:]
+    iv = combined[SALT_LEN:SALT_LEN + 16]
+    ciphertext = combined[SALT_LEN + 16:]
 
     key = derive_key(master_password, salt)
     mode = pyaes.AESModeOfOperationCBC(key, iv)
     decrypter = pyaes.Decrypter(mode)
 
     plaintext_padded = decrypter.feed(ciphertext)
-    plaintext_padded += decrypter.feed()  # finalise (strips padding)
-
+    plaintext_padded += decrypter.feed()
     return plaintext_padded.decode('utf-8')
 
 
 def clear_screen():
-    """Clear the terminal screen."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
-def print_frame(title: str, content_lines: list, width: int = 60):
-    """Print a framed box with a title and content lines."""
-    border = Fore.CYAN + '+' + '-' * (width - 2) + '+' + Style.RESET_ALL
-    print(border)
-    # Title line
+def format_number(num):
+    """Format a number to avoid scientific notation and show appropriate decimals."""
+    if isinstance(num, (int, float)):
+        if abs(num) < 1e-6:
+            return f"{num:.12f}".rstrip('0').rstrip('.')
+        elif abs(num) < 0.01:
+            return f"{num:.8f}".rstrip('0').rstrip('.')
+        elif num == int(num):
+            return str(int(num))
+        else:
+            return f"{num:.2f}".rstrip('0').rstrip('.')
+    return str(num)
+
+
+def print_frame(title, content_lines, width=70):
+    """Draw a simple framed box with a title."""
+    border = '+' + '-' * (width - 2) + '+'
     title_line = f"| {Fore.YELLOW}{title}{Style.RESET_ALL}"
+    print(Fore.CYAN + border + Style.RESET_ALL)
     print(title_line + ' ' * (width - len(title_line) - 1) + '|')
     print(Fore.CYAN + '|' + '-' * (width - 2) + '|' + Style.RESET_ALL)
     for line in content_lines:
-        # Truncate if too long
         if len(line) > width - 4:
             line = line[:width - 7] + '...'
         print(f"| {line.ljust(width - 4)} |")
-    print(border)
+    print(Fore.CYAN + border + Style.RESET_ALL)
 
 
 class DuinoWallet:
@@ -106,7 +108,6 @@ class DuinoWallet:
         if self.session:
             await self.session.close()
 
-    # ---------- Wallet file operations ----------
     async def load_wallet(self, master_password: str) -> bool:
         if not os.path.exists(WALLET_FILE):
             return False
@@ -143,33 +144,19 @@ class DuinoWallet:
         await self.save_wallet(master_password)
         print(Fore.GREEN + f"Wallet created for {username}." + Style.RESET_ALL)
 
-    # ---------- API helpers ----------
     async def _request(self, method: str, endpoint: str, params: dict = None):
-        """Unified request handler that works with JSON or plain text responses."""
         url = f"{API_BASE}/{endpoint}"
         async with self.session.request(method, url, params=params) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 raise Exception(f"HTTP {resp.status}: {text}")
-
-            # Try to parse as JSON
             try:
                 data = await resp.json()
             except aiohttp.ContentTypeError:
-                # Not JSON – return the raw text
-                text = await resp.text()
-                return text
-
-            # If JSON, check success flag
+                return await resp.text()
             if isinstance(data, dict) and not data.get("success", True):
-                # Prefer 'message' over 'error' (some endpoints use 'message')
                 error_msg = data.get("message") or data.get("error") or "Unknown error"
-                # If still unknown, include the full response for debugging
-                if error_msg == "Unknown error":
-                    error_msg = f"Unknown error (full response: {data})"
                 raise Exception(f"API error: {error_msg}")
-
-            # Return the 'result' field if present, otherwise the whole data
             return data.get("result", data)
 
     async def _get(self, endpoint: str, params: dict = None):
@@ -178,7 +165,6 @@ class DuinoWallet:
     async def _post(self, endpoint: str, params: dict = None):
         return await self._request("POST", endpoint, params)
 
-    # ---------- API endpoints ----------
     async def get_balance(self) -> float:
         result = await self._get(f"balances/{self.username}")
         if isinstance(result, dict):
@@ -198,7 +184,6 @@ class DuinoWallet:
                 return result
             return []
         except Exception as e:
-            # If the error message indicates no miners, return empty list silently
             if "No miners detected" in str(e):
                 return []
             raise
@@ -227,24 +212,17 @@ class DuinoWallet:
         return result
 
     async def set_mining_key(self, mining_key: str) -> dict:
-        params = {
-            "u": self.username,
-            "k": mining_key,
-            "password": self.password
-        }
-        result = await self._post("mining_key", params)
-        return result
+        params = {"u": self.username, "k": mining_key, "password": self.password}
+        return await self._post("mining_key", params)
 
     async def check_mining_key(self, mining_key: str) -> bool:
         params = {"u": self.username, "k": mining_key}
         result = await self._get("mining_key", params)
         return result.get("has_key", False)
 
-    # ---------- Interactive menu ----------
     async def run(self):
         init(autoreset=True)
 
-        # Unlock or create wallet
         if os.path.exists(WALLET_FILE):
             clear_screen()
             print(Fore.CYAN + "Duino-Coin Wallet" + Style.RESET_ALL)
@@ -262,20 +240,15 @@ class DuinoWallet:
             print(Fore.GREEN + "Wallet created successfully!" + Style.RESET_ALL)
             input("Press Enter to continue...")
 
-        # Main loop
         while True:
             clear_screen()
-            # Fetch balance for header
             try:
                 bal = await self.get_balance()
-                balance_str = f"{bal:.8f} DUCO"
+                balance_str = f"{format_number(bal)} DUCO"
             except:
                 balance_str = "?"
 
-            # Build header
             header = f"  {Fore.CYAN}Duino-Coin Wallet{Style.RESET_ALL}  |  {Fore.GREEN}{self.username}{Style.RESET_ALL}  |  Balance: {Fore.YELLOW}{balance_str}{Style.RESET_ALL}"
-
-            # Menu options
             menu_lines = [
                 "1. View balance",
                 "2. View recent transactions",
@@ -287,7 +260,6 @@ class DuinoWallet:
                 "8. Set mining key",
                 "9. Exit"
             ]
-            # Frame it with the header
             print_frame(header, menu_lines, width=70)
             choice = input(Fore.CYAN + "Select option: " + Style.RESET_ALL).strip()
 
@@ -295,7 +267,7 @@ class DuinoWallet:
                 if choice == "1":
                     bal = await self.get_balance()
                     clear_screen()
-                    print_frame("Balance", [f"{Fore.GREEN}{bal:.8f} DUCO{Style.RESET_ALL}"], width=50)
+                    print_frame("Balance", [f"{format_number(bal)} DUCO"], width=50)
                     input("Press Enter to continue...")
 
                 elif choice == "2":
@@ -308,8 +280,8 @@ class DuinoWallet:
                     else:
                         lines = []
                         for tx in txs:
-                            lines.append(f"{Fore.YELLOW}ID:{tx['id']}{Style.RESET_ALL}  {tx['datetime']}")
-                            lines.append(f"  {tx['sender']} -> {tx['recipient']} : {Fore.GREEN}{tx['amount']} DUCO{Style.RESET_ALL}")
+                            lines.append(f"ID: {tx['id']}  {tx['datetime']}")
+                            lines.append(f"  {tx['sender']} -> {tx['recipient']} : {tx['amount']} DUCO")
                             lines.append(f"  Memo: {tx.get('memo', 'None')}")
                             lines.append("")
                         print_frame("Recent Transactions", lines, width=70)
@@ -324,14 +296,14 @@ class DuinoWallet:
                         else:
                             lines = []
                             for m in miners:
-                                lines.append(f"{Fore.YELLOW}Identifier: {m['identifier']}{Style.RESET_ALL}")
-                                lines.append(f"  Algorithm: {m['algorithm']}, Hashrate: {Fore.CYAN}{m['hashrate']} H/s{Style.RESET_ALL}")
-                                lines.append(f"  Accepted: {Fore.GREEN}{m['accepted']}{Style.RESET_ALL}, Rejected: {Fore.RED}{m['rejected']}{Style.RESET_ALL}")
+                                lines.append(f"Identifier: {m['identifier']}")
+                                lines.append(f"  Algorithm: {m['algorithm']}, Hashrate: {m['hashrate']} H/s")
+                                lines.append(f"  Accepted: {m['accepted']}, Rejected: {m['rejected']}")
                                 lines.append(f"  Software: {m['software']}")
                                 lines.append("")
                             print_frame("My Miners", lines, width=70)
                     except Exception as e:
-                        print_frame("My Miners", [f"{Fore.RED}Could not fetch miners: {e}{Style.RESET_ALL}"], width=60)
+                        print_frame("My Miners", [f"Could not fetch miners: {e}"], width=60)
                     input("Press Enter to continue...")
 
                 elif choice == "4":
@@ -350,23 +322,19 @@ class DuinoWallet:
                         result = await self.send_duco(recipient, amount, memo)
                         if isinstance(result, dict):
                             tx_id = result.get('id', 'N/A')
-                            msg = f"Transaction sent! ID: {Fore.GREEN}{tx_id}{Style.RESET_ALL}"
+                            msg = f"Transaction sent! ID: {tx_id}"
                         else:
                             msg = str(result)
                             if "Successfully transferred" in msg:
                                 parts = msg.split(',')
                                 if len(parts) >= 3:
                                     tx_hash = parts[-1].strip()
-                                    msg = f"Transaction sent! Hash: {Fore.GREEN}{tx_hash}{Style.RESET_ALL}"
-                                else:
-                                    msg = Fore.GREEN + msg + Style.RESET_ALL
-                            else:
-                                msg = Fore.GREEN + msg + Style.RESET_ALL
+                                    msg = f"Transaction sent! Hash: {tx_hash}"
                         clear_screen()
-                        print_frame("Send DUCO", [msg], width=60)
+                        print_frame("Send DUCO", [Fore.GREEN + msg + Style.RESET_ALL], width=60)
                     except Exception as e:
                         clear_screen()
-                        print_frame("Send DUCO", [f"{Fore.RED}Send failed: {e}{Style.RESET_ALL}"], width=60)
+                        print_frame("Send DUCO", [Fore.RED + f"Send failed: {e}" + Style.RESET_ALL], width=60)
                     input("Press Enter to continue...")
 
                 elif choice == "5":
@@ -377,9 +345,9 @@ class DuinoWallet:
                     else:
                         lines = []
                         for idx, item in items.items():
-                            lines.append(f"{Fore.YELLOW}ID: {idx}{Style.RESET_ALL}")
-                            lines.append(f"  Name: {Fore.CYAN}{item['name']}{Style.RESET_ALL}")
-                            lines.append(f"  Price: {Fore.GREEN}{item['price']} DUCO{Style.RESET_ALL}")
+                            lines.append(f"ID: {idx}")
+                            lines.append(f"  Name: {item['name']}")
+                            lines.append(f"  Price: {item['price']} DUCO")
                             lines.append(f"  {item['description']}")
                             lines.append("")
                         print_frame("Shop Items", lines, width=70)
@@ -395,15 +363,12 @@ class DuinoWallet:
                         continue
                     try:
                         result = await self.buy_shop_item(int(item_id))
-                        if isinstance(result, dict):
-                            msg = f"Purchase successful: {result}"
-                        else:
-                            msg = str(result)
+                        msg = str(result)
                         clear_screen()
                         print_frame("Buy Shop Item", [Fore.GREEN + msg + Style.RESET_ALL], width=60)
                     except Exception as e:
                         clear_screen()
-                        print_frame("Buy Shop Item", [f"{Fore.RED}Buy failed: {e}{Style.RESET_ALL}"], width=60)
+                        print_frame("Buy Shop Item", [Fore.RED + f"Buy failed: {e}" + Style.RESET_ALL], width=60)
                     input("Press Enter to continue...")
 
                 elif choice == "7":
@@ -414,15 +379,18 @@ class DuinoWallet:
                         for key, value in stats.items():
                             if isinstance(value, (list, dict)):
                                 continue
-                            lines.append(f"{Fore.CYAN}{key}:{Style.RESET_ALL} {value}")
+                            # Format numeric values
+                            if isinstance(value, (int, float)):
+                                value = format_number(value)
+                            lines.append(f"{key}: {value}")
                         if "Top 10 richest miners" in stats:
                             lines.append("")
-                            lines.append(f"{Fore.YELLOW}Top 10 richest miners:{Style.RESET_ALL}")
+                            lines.append("Top 10 richest miners:")
                             for line in stats["Top 10 richest miners"]:
                                 lines.append(f"  {line}")
                         print_frame("Server Statistics", lines, width=70)
                     except Exception as e:
-                        print_frame("Server Statistics", [f"{Fore.RED}Could not fetch statistics: {e}{Style.RESET_ALL}"], width=60)
+                        print_frame("Server Statistics", [f"Could not fetch statistics: {e}"], width=60)
                     input("Press Enter to continue...")
 
                 elif choice == "8":
@@ -437,23 +405,18 @@ class DuinoWallet:
                             print_frame("Mining Key", [Fore.GREEN + msg + Style.RESET_ALL], width=60)
                         except Exception as e:
                             clear_screen()
-                            print_frame("Mining Key", [f"{Fore.RED}Failed to set mining key: {e}{Style.RESET_ALL}"], width=60)
+                            print_frame("Mining Key", [Fore.RED + f"Failed to set mining key: {e}" + Style.RESET_ALL], width=60)
                     else:
                         test_key = input("Enter the mining key to verify: ").strip()
                         try:
                             has = await self.check_mining_key(test_key)
-                            if has:
-                                msg = "Mining key is correct."
-                            else:
-                                msg = "Mining key is incorrect or not set."
+                            msg = "Mining key is correct." if has else "Mining key is incorrect or not set."
                             clear_screen()
-                            if has:
-                                print_frame("Mining Key", [Fore.GREEN + msg + Style.RESET_ALL], width=60)
-                            else:
-                                print_frame("Mining Key", [Fore.RED + msg + Style.RESET_ALL], width=60)
+                            color = Fore.GREEN if has else Fore.RED
+                            print_frame("Mining Key", [color + msg + Style.RESET_ALL], width=60)
                         except Exception as e:
                             clear_screen()
-                            print_frame("Mining Key", [f"{Fore.RED}Check failed: {e}{Style.RESET_ALL}"], width=60)
+                            print_frame("Mining Key", [Fore.RED + f"Check failed: {e}" + Style.RESET_ALL], width=60)
                     input("Press Enter to continue...")
 
                 elif choice == "9":
@@ -467,7 +430,7 @@ class DuinoWallet:
 
             except Exception as e:
                 clear_screen()
-                print_frame("Error", [f"{Fore.RED}Unexpected error: {e}{Style.RESET_ALL}"], width=60)
+                print_frame("Error", [Fore.RED + f"Unexpected error: {e}" + Style.RESET_ALL], width=60)
                 input("Press Enter to continue...")
 
 
