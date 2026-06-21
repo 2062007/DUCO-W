@@ -302,13 +302,20 @@ class DuinoWallet:
 
             try:
                 if choice == "1":
-                    bal = await self.get_balance()
-                    # Cache the balance and timestamp
-                    self.cached_balance = bal
-                    self.last_check_time = datetime.now()
-                    clear_screen()
-                    print_frame("Balance", [f"{format_number(bal)} DUCO"], width=50)
-                    input("Press Enter to continue...")
+                    try:
+                        bal = await self.get_balance()
+                        self.cached_balance = bal
+                        self.last_check_time = datetime.now()
+                        # Continue the loop – the header will now show updated balance
+                    except Exception as e:
+                        # Show error in the header temporarily
+                        self.cached_balance = None
+                        self.last_check_time = None
+                        # We'll show the error as a message; we can handle it by printing an error frame
+                        clear_screen()
+                        print_frame("Error", [Fore.RED + f"Failed to fetch balance: {e}" + Style.RESET_ALL], width=60)
+                        input("Press Enter to continue...")
+                        continue
 
                 elif choice == "2":
                     limit = input("Number of transactions to show (default 5): ").strip()
