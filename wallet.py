@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Duino-Coin Interactive Wallet – Clean UI
+Duino-Coin Interactive Wallet – Premium UI
 Pure Python, async, using aiohttp and pyaes.
-Uses HTTPS and minimal color for clarity.
+Features ASCII logo, framed menus, and HTTPS.
 """
 
 import asyncio
@@ -11,20 +11,67 @@ import json
 import hashlib
 import os
 import base64
-import sys
 from datetime import datetime
 
 import pyaes
 import colorama
 from colorama import Fore, Style, init
 
-# Constants
+# ---------- Constants ----------
 API_BASE = "https://server.duinocoin.com"
 WALLET_FILE = "wallet.dat"
 SALT_LEN = 16
 IV_LEN = 16
 
+# ASCII art logo (Duino-Coin)
+LOGO = r"""
+                             +++++++++++++++++++++                              
+                        ++++++++++++++++++++++++++++++++                        
+                     +++++++++++++++++++++++++++++++++++++=                     
+                  ++++++++++++++++++++++++++++++++++++++++++++                  
+               +++++++++++++++++++++++++++++++++++++++++++++++++                
+             ++++++++++++++++++++++++++++++++++++++++++++++++++++++             
+           ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++           
+          ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++          
+        +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++         
+       ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++       
+      +++++++++++++++++:.......................:--=+++++++++++++++++++++++      
+     ++++++++++++++++++:                          .:-=+++++++++++++++++++++     
+    +++++++++++++++++++:                             .-=++++++++++++++++++++    
+   ++++++++++++++++++++:......................         .-++++++++++++++++++++   
+  ++++++++++++++++++++++++++++++++++++++++++==-.        .:=++++++++++++++++++   
+  +++++++++++++++++++++-................:=++++++=:.       .=++++++++++++++++++  
+ ++++++++++++++++++++++:                  .-++++++=.       .=++++++++++++++++++ 
+ ++++++++++++++++++++++:                    :+++++++:       :++++++++++++++++++ 
++++++++++++++++++++++++=:::::::::::::..      :+++++++.      .=+++++++++++++++++ 
+++++++++++++++++++++++++++++++++++++++=.     .-++++++=.      :++++++++++++++++++
++++++++++++++++++++++++++++++++++++++++=.     .+++++++.      .++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++:     .+++++++:      .++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++:     .+++++++:      .++++++++++++++++++
++++++++++++++++++++++++++++++++++++++++=.     .+++++++.      .++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++=.     .-++++++=.      -+++++++++++++++++=
++++++++++++++++++++++++-...............      :++++++=.      .=+++++++++++++++++ 
+ ++++++++++++++++++++++:                    -++++++=:       -++++++++++++++++++ 
+ ++++++++++++++++++++++:                 .:=++++++-.       :+++++++++++++++++++ 
+  +++++++++++++++++++++:...............:-+++++++=:        :+++++++++++++++++++  
+  +++++++++++++++++++++++++++++++++++++======-:.        .:+++++++++++++++++++   
+   ++++++++++++++++++++:.....................          .=++++++++++++++++++++   
+    +++++++++++++++++++:                             .=+++++++++++++++++++++    
+     ++++++++++++++++++:                          .:=++++++++++++++++++++++     
+      +++++++++++++++++-.....................:::-=++++++++++++++++++++++++      
+       ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++       
+        +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++         
+          ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++          
+           +++++++++++++++++++++++++++++++++++++++++++++++++++++++++            
+             +++++++++++++++++++++++++++++++++++++++++++++++++++++              
+                ++++++++++++++++++++++++++++++++++++++++++++++++                
+                  +++++++++++++++++++++++++++++++++++++++++++                   
+                      ++++++++++++++++++++++++++++++++++++                      
+                         ++++++++++++++++++++++++++++++                         
+                              ++++++++++++++++++++                              
+"""
 
+# ---------- Utilities ----------
 def derive_key(master_password: str, salt: bytes) -> bytes:
     data = master_password.encode() + salt
     return hashlib.sha256(data).digest()
@@ -41,7 +88,6 @@ def encrypt_data(data: str, master_password: str) -> str:
     plaintext = data.encode('utf-8')
     ciphertext = encrypter.feed(plaintext)
     ciphertext += encrypter.feed()
-
     combined = salt + iv + ciphertext
     return base64.b64encode(combined).decode()
 
@@ -79,20 +125,32 @@ def format_number(num):
     return str(num)
 
 
-def print_frame(title, content_lines, width=70):
-    """Draw a simple framed box with a title."""
-    border = '+' + '-' * (width - 2) + '+'
-    title_line = f"| {Fore.YELLOW}{title}{Style.RESET_ALL}"
-    print(Fore.CYAN + border + Style.RESET_ALL)
-    print(title_line + ' ' * (width - len(title_line) - 1) + '|')
-    print(Fore.CYAN + '|' + '-' * (width - 2) + '|' + Style.RESET_ALL)
+def print_frame(title, content_lines, width=80, show_border=True):
+    """Draw a framed box with a title and content lines."""
+    if show_border:
+        border = '+' + '-' * (width - 2) + '+'
+        print(Fore.CYAN + border + Style.RESET_ALL)
+        title_line = f"| {Fore.YELLOW}{title}{Style.RESET_ALL}"
+        print(title_line + ' ' * (width - len(title_line) - 1) + '|')
+        print(Fore.CYAN + '|' + '-' * (width - 2) + '|' + Style.RESET_ALL)
+    else:
+        # No top border, just title line
+        title_line = f"{Fore.YELLOW}{title}{Style.RESET_ALL}"
+        print(title_line.center(width))
+
     for line in content_lines:
         if len(line) > width - 4:
             line = line[:width - 7] + '...'
-        print(f"| {line.ljust(width - 4)} |")
-    print(Fore.CYAN + border + Style.RESET_ALL)
+        if show_border:
+            print(f"| {line.ljust(width - 4)} |")
+        else:
+            print(line)
+
+    if show_border:
+        print(Fore.CYAN + border + Style.RESET_ALL)
 
 
+# ---------- Wallet Core ----------
 class DuinoWallet:
     def __init__(self):
         self.username = None
@@ -220,9 +278,11 @@ class DuinoWallet:
         result = await self._get("mining_key", params)
         return result.get("has_key", False)
 
+    # ---------- UI ----------
     async def run(self):
         init(autoreset=True)
 
+        # Unlock or create wallet
         if os.path.exists(WALLET_FILE):
             clear_screen()
             print(Fore.CYAN + "Duino-Coin Wallet" + Style.RESET_ALL)
@@ -240,27 +300,40 @@ class DuinoWallet:
             print(Fore.GREEN + "Wallet created successfully!" + Style.RESET_ALL)
             input("Press Enter to continue...")
 
+        # Main loop
         while True:
             clear_screen()
+            # Fetch balance for header
             try:
                 bal = await self.get_balance()
                 balance_str = f"{format_number(bal)} DUCO"
             except:
                 balance_str = "?"
 
-            header = f"  {Fore.CYAN}Duino-Coin Wallet{Style.RESET_ALL}  |  {Fore.GREEN}{self.username}{Style.RESET_ALL}  |  Balance: {Fore.YELLOW}{balance_str}{Style.RESET_ALL}"
+            # Build the main screen content
+            logo_lines = LOGO.splitlines()
+            # Center the logo (optional)
+            centered_logo = [line.center(80) for line in logo_lines]
+
+            header_line = f"{Fore.CYAN}◆ Duino-Coin Wallet {Style.RESET_ALL}│ {Fore.GREEN}{self.username}{Style.RESET_ALL} │ Balance: {Fore.YELLOW}{balance_str}{Style.RESET_ALL}"
             menu_lines = [
-                "1. View balance",
-                "2. View recent transactions",
-                "3. View my miners",
-                "4. Send DUCO",
-                "5. View shop items",
-                "6. Buy shop item",
-                "7. View statistics",
-                "8. Set mining key",
-                "9. Exit"
+                " 1. View balance",
+                " 2. View recent transactions",
+                " 3. View my miners",
+                " 4. Send DUCO",
+                " 5. View shop items",
+                " 6. Buy shop item",
+                " 7. View statistics",
+                " 8. Set mining key",
+                " 9. Exit"
             ]
-            print_frame(header, menu_lines, width=70)
+
+            # Combine: logo, separator, header, menu
+            content = centered_logo + [""] + [header_line] + [""] + menu_lines
+
+            print_frame("", content, width=80, show_border=False)
+
+            # Prompt
             choice = input(Fore.CYAN + "Select option: " + Style.RESET_ALL).strip()
 
             try:
@@ -379,7 +452,6 @@ class DuinoWallet:
                         for key, value in stats.items():
                             if isinstance(value, (list, dict)):
                                 continue
-                            # Format numeric values
                             if isinstance(value, (int, float)):
                                 value = format_number(value)
                             lines.append(f"{key}: {value}")
