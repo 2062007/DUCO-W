@@ -178,8 +178,14 @@ class DuinoWallet:
     async def get_balance(self) -> float:
         result = await self._get(f"balances/{self.username}")
         if isinstance(result, dict):
-            return result["balance"]
-        return float(result)
+            if "balance" in result:
+                return result["balance"]
+            else:
+                raise ValueError(f"Unexpected response structure: {result}")
+        elif isinstance(result, (int, float)):
+            return float(result)
+        else:
+            raise ValueError(f"Unparseable balance response: {result}")
 
     async def get_transactions(self, limit: int = 5) -> list:
         result = await self._get(f"user_transactions/{self.username}", {"limit": limit})
@@ -259,8 +265,9 @@ class DuinoWallet:
             try:
                 bal = await self.get_balance()
                 balance_str = f"{format_number(bal)} DUCO"
-            except:
-                balance_str = "?"
+            except Exception as e:
+                # Show a clear error instead of "?"
+                balance_str = f"Error: {str(e)[:30]}"
 
             header_line = f"{Fore.CYAN}◆ Duino-Coin Wallet {Style.RESET_ALL}│ {Fore.GREEN}{self.username}{Style.RESET_ALL} │ Balance: {Fore.YELLOW}{balance_str}{Style.RESET_ALL}"
             menu_lines = [
@@ -275,7 +282,6 @@ class DuinoWallet:
                 " 9. Exit"
             ]
 
-            # Just header + menu
             content = [header_line, ""] + menu_lines
             print_frame("", content, width=70, show_border=False)
 
