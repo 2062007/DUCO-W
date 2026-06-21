@@ -123,42 +123,59 @@ class DuinoWallet:
         print(Fore.GREEN + f"Wallet created for {username}." + Style.RESET_ALL)
 
     # ---------- API helpers ----------
-    async def _get(self, endpoint: str, params: dict = None) -> dict:
+    async def _request(self, method: str, endpoint: str, params: dict = None):
+        """Unified request handler that works with JSON or plain text responses."""
         url = f"{API_BASE}/{endpoint}"
-        async with self.session.get(url, params=params) as resp:
+        async with self.session.request(method, url, params=params) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 raise Exception(f"HTTP {resp.status}: {text}")
-            data = await resp.json()
-            if not data.get("success", False):
+
+            # Try to parse as JSON
+            try:
+                data = await resp.json()
+            except aiohttp.ContentTypeError:
+                # Not JSON – return the raw text
+                text = await resp.text()
+                return text
+
+            # If JSON, check success flag
+            if isinstance(data, dict) and not data.get("success", True):
                 error_msg = data.get("error", "Unknown error")
+                # If the error is "Unknown error", include the full response for debugging
+                if error_msg == "Unknown error":
+                    error_msg = f"Unknown error (full response: {data})"
                 raise Exception(f"API error: {error_msg}")
+
+            # Return the 'result' field if present, otherwise the whole data
             return data.get("result", data)
 
-    async def _post(self, endpoint: str, params: dict = None) -> dict:
-        url = f"{API_BASE}/{endpoint}"
-        async with self.session.post(url, params=params) as resp:
-            if resp.status != 200:
-                text = await resp.text()
-                raise Exception(f"HTTP {resp.status}: {text}")
-            data = await resp.json()
-            if not data.get("success", False):
-                error_msg = data.get("error", "Unknown error")
-                raise Exception(f"API error: {error_msg}")
-            return data.get("result", data)
+    async def _get(self, endpoint: str, params: dict = None):
+        return await self._request("GET", endpoint, params)
+
+    async def _post(self, endpoint: str, params: dict = None):
+        return await self._request("POST", endpoint, params)
 
     # ---------- API endpoints ----------
     async def get_balance(self) -> float:
         result = await self._get(f"balances/{self.username}")
-        return result["balance"]
+        # result might be a dict with 'balance' key
+        if isinstance(result, dict):
+            return result["balance"]
+        return float(result)
 
     async def get_transactions(self, limit: int = 5) -> list:
         result = await self._get(f"user_transactions/{self.username}", {"limit": limit})
+        if isinstance(result, list):
+            return result
+        # Sometimes it may be a dict with transactions; adapt if needed
         return result
 
     async def get_miners(self) -> list:
         result = await self._get(f"miners/{self.username}")
-        return result
+        if isinstance(result, list):
+            return result
+        return []
 
     async def send_duco(self, recipient: str, amount: float, memo: str = ""):
         params = {
@@ -168,10 +185,7 @@ class DuinoWallet:
             "amount": str(amount),
             "memo": memo
         }
-        # The transaction endpoint may return a string (e.g., "Transaction sent")
-        # or a dict with an 'id'. We'll return whatever we get.
-        result = await self._get("transaction", params)
-        return result
+        return await self._get("transaction", params)
 
     async def get_shop_items(self) -> dict:
         result = await self._get("shop_items")
@@ -263,7 +277,6 @@ class DuinoWallet:
                                 print(f"  Software: {m['software']}")
                                 print()
                     except Exception as e:
-                        # If the API returns an error, show it
                         print(Fore.RED + f"Could not fetch miners: {e}" + Style.RESET_ALL)
 
                 elif choice == "4":
@@ -277,12 +290,10 @@ class DuinoWallet:
                     memo = input("Memo (optional): ").strip()
                     try:
                         result = await self.send_duco(recipient, amount, memo)
-                        # result can be a dict (with 'id') or a string (confirmation)
                         if isinstance(result, dict):
                             tx_id = result.get('id', 'N/A')
                             print(Fore.GREEN + f"Transaction sent! ID: {tx_id}" + Style.RESET_ALL)
                         else:
-                            # It's a string message
                             print(Fore.GREEN + str(result) + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"Send failed: {e}" + Style.RESET_ALL)
@@ -306,7 +317,6 @@ class DuinoWallet:
                         continue
                     try:
                         result = await self.buy_shop_item(int(item_id))
-                        # result could be a string or dict
                         if isinstance(result, dict):
                             print(Fore.GREEN + f"Purchase successful: {result}" + Style.RESET_ALL)
                         else:
