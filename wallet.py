@@ -179,11 +179,19 @@ class DuinoWallet:
         result = await self._get(f"balances/{self.username}")
         if isinstance(result, dict):
             if "balance" in result:
-                return result["balance"]
+                return float(result["balance"])
             else:
                 raise ValueError(f"Unexpected response structure: {result}")
         elif isinstance(result, (int, float)):
             return float(result)
+        elif isinstance(result, str):
+            # Try to parse as float, handle empty string
+            if result.strip() == "":
+                return 0.0
+            try:
+                return float(result)
+            except ValueError:
+                raise ValueError(f"Unparseable balance string: {result}")
         else:
             raise ValueError(f"Unparseable balance response: {result}")
 
@@ -265,6 +273,8 @@ class DuinoWallet:
             try:
                 bal = await self.get_balance()
                 balance_str = f"{format_number(bal)} DUCO"
+                if balance_str.strip() == "DUCO":  # happens if format_number returns empty string
+                    balance_str = "0 DUCO"
             except Exception as e:
                 # Show a clear error instead of "?"
                 balance_str = f"Error: {str(e)[:30]}"
