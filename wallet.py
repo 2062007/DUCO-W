@@ -2,6 +2,7 @@
 """
 Duino-Coin Interactive Wallet
 Pure Python, async, using aiohttp and pyaes.
+Uses HTTPS for secure communication.
 """
 
 import asyncio
@@ -20,7 +21,7 @@ import colorama
 from colorama import Fore, Style
 
 # Constants
-API_BASE = "http://server.duinocoin.com"
+API_BASE = "https://server.duinocoin.com"   # <-- now using HTTPS
 WALLET_FILE = "wallet.dat"
 SALT_LEN = 16
 IV_LEN = 16
@@ -39,15 +40,16 @@ def encrypt_data(data: str, master_password: str) -> str:
     iv = os.urandom(IV_LEN)
     key = derive_key(master_password, salt)
 
-    # Pad data to AES block size (16 bytes)
-    pad_len = 16 - (len(data) % 16)
-    padded = data + chr(pad_len) * pad_len
-    plaintext = padded.encode()
+    # Convert to bytes and pad to AES block size (16 bytes)
+    plaintext = data.encode('utf-8')
+    pad_len = 16 - (len(plaintext) % 16)
+    if pad_len == 0:
+        pad_len = 16  # add a full block of padding
+    padded = plaintext + bytes([pad_len]) * pad_len
 
     aes = pyaes.AESModeOfOperationCBC(key, iv)
-    ciphertext = aes.encrypt(plaintext)
+    ciphertext = aes.encrypt(padded)
 
-    # Combine salt + iv + ciphertext and base64 encode
     combined = salt + iv + ciphertext
     return base64.b64encode(combined).decode()
 
@@ -66,7 +68,7 @@ def decrypt_data(encrypted_b64: str, master_password: str) -> str:
     # Remove PKCS#7 padding
     pad_len = plaintext_padded[-1]
     plaintext = plaintext_padded[:-pad_len]
-    return plaintext.decode()
+    return plaintext.decode('utf-8')
 
 
 class DuinoWallet:
@@ -138,8 +140,6 @@ class DuinoWallet:
     async def _post(self, endpoint: str, params: dict = None) -> dict:
         """Perform a POST request with parameters."""
         url = f"{API_BASE}/{endpoint}"
-        # The API uses GET for most endpoints, but mining_key uses POST.
-        # We'll use POST with params in the URL (since they are query string anyway)
         async with self.session.post(url, params=params) as resp:
             if resp.status != 200:
                 raise Exception(f"HTTP {resp.status}: {await resp.text()}")
@@ -196,7 +196,6 @@ class DuinoWallet:
 
     async def set_mining_key(self, mining_key: str) -> dict:
         """Set or update the user's mining key."""
-        # POST to /mining_key
         params = {
             "u": self.username,
             "k": mining_key,
@@ -319,13 +318,11 @@ class DuinoWallet:
 
                 elif choice == "7":
                     stats = await self.get_statistics()
-                    # Pretty print some stats
                     print(Fore.CYAN + "Server Statistics:" + Style.RESET_ALL)
                     for key, value in stats.items():
                         if isinstance(value, (list, dict)):
-                            continue  # skip complex fields
+                            continue
                         print(f"  {key}: {value}")
-                    # Show top 10 if present
                     if "Top 10 richest miners" in stats:
                         print("  Top 10 richest miners:")
                         for line in stats["Top 10 richest miners"]:
@@ -340,7 +337,6 @@ class DuinoWallet:
                         except Exception as e:
                             print(Fore.RED + f"Failed to set mining key: {e}" + Style.RESET_ALL)
                     else:
-                        # Check current key (requires user to enter one to verify)
                         test_key = input("Enter the mining key to verify: ").strip()
                         try:
                             has = await self.check_mining_key(test_key)
