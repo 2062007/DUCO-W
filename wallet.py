@@ -141,8 +141,9 @@ class DuinoWallet:
 
             # If JSON, check success flag
             if isinstance(data, dict) and not data.get("success", True):
-                error_msg = data.get("error", "Unknown error")
-                # If the error is "Unknown error", include the full response for debugging
+                # Prefer 'message' over 'error' (some endpoints use 'message')
+                error_msg = data.get("message") or data.get("error") or "Unknown error"
+                # If still unknown, include the full response for debugging
                 if error_msg == "Unknown error":
                     error_msg = f"Unknown error (full response: {data})"
                 raise Exception(f"API error: {error_msg}")
@@ -159,7 +160,6 @@ class DuinoWallet:
     # ---------- API endpoints ----------
     async def get_balance(self) -> float:
         result = await self._get(f"balances/{self.username}")
-        # result might be a dict with 'balance' key
         if isinstance(result, dict):
             return result["balance"]
         return float(result)
@@ -168,14 +168,19 @@ class DuinoWallet:
         result = await self._get(f"user_transactions/{self.username}", {"limit": limit})
         if isinstance(result, list):
             return result
-        # Sometimes it may be a dict with transactions; adapt if needed
         return result
 
     async def get_miners(self) -> list:
-        result = await self._get(f"miners/{self.username}")
-        if isinstance(result, list):
-            return result
-        return []
+        try:
+            result = await self._get(f"miners/{self.username}")
+            if isinstance(result, list):
+                return result
+            return []
+        except Exception as e:
+            # If the error message indicates no miners, return empty list silently
+            if "No miners detected" in str(e):
+                return []
+            raise
 
     async def send_duco(self, recipient: str, amount: float, memo: str = ""):
         params = {
@@ -268,7 +273,7 @@ class DuinoWallet:
                     try:
                         miners = await self.get_miners()
                         if not miners:
-                            print("No miners found.")
+                            print("No miners active.")
                         else:
                             for m in miners:
                                 print(f"{Fore.YELLOW}Identifier: {m['identifier']}{Style.RESET_ALL}")
@@ -294,7 +299,18 @@ class DuinoWallet:
                             tx_id = result.get('id', 'N/A')
                             print(Fore.GREEN + f"Transaction sent! ID: {tx_id}" + Style.RESET_ALL)
                         else:
-                            print(Fore.GREEN + str(result) + Style.RESET_ALL)
+                            # Plain response: parse hash if present
+                            msg = str(result)
+                            if "Successfully transferred" in msg:
+                                # Extract hash from end of string
+                                parts = msg.split(',')
+                                if len(parts) >= 3:
+                                    tx_hash = parts[-1].strip()
+                                    print(Fore.GREEN + f"Transaction sent! Hash: {tx_hash}" + Style.RESET_ALL)
+                                else:
+                                    print(Fore.GREEN + msg + Style.RESET_ALL)
+                            else:
+                                print(Fore.GREEN + msg + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"Send failed: {e}" + Style.RESET_ALL)
 
