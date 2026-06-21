@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Duino-Coin Interactive Wallet
-Pure Python, async, using aiohttp and pyaes.
+Pure Python, async, using aiohttp and pyaes (BlockFeeder API).
 Uses HTTPS for secure communication.
 """
 
@@ -15,13 +15,12 @@ import sys
 import time
 from datetime import datetime
 
-# Third-party pure Python libraries
 import pyaes
 import colorama
 from colorama import Fore, Style
 
 # Constants
-API_BASE = "https://server.duinocoin.com"   # HTTPS now
+API_BASE = "https://server.duinocoin.com"
 WALLET_FILE = "wallet.dat"
 SALT_LEN = 16
 IV_LEN = 16
@@ -35,46 +34,53 @@ def derive_key(master_password: str, salt: bytes) -> bytes:
 
 
 def encrypt_data(data: str, master_password: str) -> str:
-    """Encrypt a string with AES-256-CBC. Returns base64(salt + iv + ciphertext)."""
+    """
+    Encrypt a string with AES-256-CBC using pyaes.Encrypter (PKCS#7 padding).
+    Returns base64(salt + iv + ciphertext).
+    """
     salt = os.urandom(SALT_LEN)
     iv = os.urandom(IV_LEN)
     key = derive_key(master_password, salt)
 
-    # Convert to bytes and pad to AES block size (16 bytes)
+    # Create the CBC mode and the encrypter
+    mode = pyaes.AESModeOfOperationCBC(key, iv)
+    encrypter = pyaes.Encrypter(mode)
+
+    # Feed the plaintext bytes (Encrypter buffers internally)
     plaintext = data.encode('utf-8')
-    pad_len = 16 - (len(plaintext) % 16)
-    if pad_len == 0:
-        pad_len = 16
-    padded = plaintext + bytes([pad_len]) * pad_len
+    ciphertext = encrypter.feed(plaintext)
 
-    # --- DEBUG: check length ---
-    print(f"[DEBUG] plaintext length: {len(plaintext)}, pad_len: {pad_len}, padded length: {len(padded)}")
-    if len(padded) % 16 != 0:
-        raise ValueError(f"Padded length {len(padded)} is not a multiple of 16!")
+    # Finalise with padding (automatically adds PKCS#7 padding)
+    ciphertext += encrypter.feed()
 
-    # Encrypt using pyaes CBC mode
-    cipher = pyaes.AESModeOfOperationCBC(key, iv)
-    ciphertext = cipher.encrypt(padded)
-
+    # Combine salt + iv + ciphertext and base64 encode
     combined = salt + iv + ciphertext
     return base64.b64encode(combined).decode()
 
 
 def decrypt_data(encrypted_b64: str, master_password: str) -> str:
-    """Decrypt data that was encrypted with encrypt_data()."""
+    """
+    Decrypt data that was encrypted with encrypt_data().
+    Uses pyaes.Decrypter, which strips PKCS#7 padding automatically.
+    """
     combined = base64.b64decode(encrypted_b64)
     salt = combined[:SALT_LEN]
     iv = combined[SALT_LEN:SALT_LEN + IV_LEN]
     ciphertext = combined[SALT_LEN + IV_LEN:]
 
     key = derive_key(master_password, salt)
-    cipher = pyaes.AESModeOfOperationCBC(key, iv)
-    plaintext_padded = cipher.decrypt(ciphertext)
 
-    # Remove PKCS#7 padding
-    pad_len = plaintext_padded[-1]
-    plaintext = plaintext_padded[:-pad_len]
-    return plaintext.decode('utf-8')
+    # Create the CBC mode and the decrypter
+    mode = pyaes.AESModeOfOperationCBC(key, iv)
+    decrypter = pyaes.Decrypter(mode)
+
+    # Feed the ciphertext
+    plaintext_padded = decrypter.feed(ciphertext)
+
+    # Finalise (strips padding)
+    plaintext_padded += decrypter.feed()
+
+    return plaintext_padded.decode('utf-8')
 
 
 class DuinoWallet:
@@ -111,7 +117,7 @@ class DuinoWallet:
             self.master_password = master_password
             return True
         except Exception as e:
-            print(f"[DEBUG] Load error: {e}")
+            print(Fore.RED + f"Load error: {e}" + Style.RESET_ALL)
             return False
 
     async def save_wallet(self, master_password: str) -> None:
